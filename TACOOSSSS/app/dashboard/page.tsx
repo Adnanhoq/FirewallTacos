@@ -1,45 +1,48 @@
-"use client"
+"use client";
 
-import { useEffect, useMemo, useState } from "react"
-import { Button } from "@/components/ui/button"
-import { KPICard } from "@/components/kpi-card"
-import { ChartTimeSeries } from "@/components/chart-time-series"
-import { ChartBreakdown } from "@/components/chart-breakdown"
-import { AIInsightsPanel } from "@/components/ai-insights-panel"
-import { AlertsPanel } from "@/components/alerts-panel"
-import { LayoutHeader } from "@/components/layout-header"
+import { useEffect, useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { KPICard } from "@/components/kpi-card";
+import { ChartTimeSeries } from "@/components/chart-time-series";
+import { ChartBreakdown } from "@/components/chart-breakdown";
+import { AIInsightsPanel } from "@/components/ai-insights-panel";
+import { AlertsPanel } from "@/components/alerts-panel";
+import { LayoutHeader } from "@/components/layout-header";
 import {
   AI_INSIGHTS_HOUSEHOLD,
   calculateSummary,
   HOUSEHOLD_DATA,
   type EnergyRecord,
-} from "@/lib/mock-data"
-import type { AlertMessage } from "@/lib/types"
-import { createClient } from "@/lib/supabase/client"
-import { Zap, BarChart3, TrendingDown, Leaf } from "lucide-react"
+} from "@/lib/mock-data";
+import type { AlertMessage } from "@/lib/types";
+import { createClient } from "@/lib/supabase/client";
+import { Zap, BarChart3, TrendingDown, Leaf } from "lucide-react";
+import { buildLLMUsageSummary } from "@/lib/llm-summary";
 
-type TariffBand = "off_peak" | "shoulder" | "peak"
+type TariffBand = "off_peak" | "shoulder" | "peak";
 
 const TARIFF_RATES: Record<TariffBand, number> = {
   off_peak: 0.12,
   shoulder: 0.18,
   peak: 0.28,
-}
+};
 
-type Room = { id: number; name: string }
+type Room = { id: number; name: string };
 
 export default function Dashboard() {
-  const [supabaseData, setSupabaseData] = useState<EnergyRecord[]>([])
-  const [rooms, setRooms] = useState<Room[]>([])
-  const [selectedRoomId, setSelectedRoomId] = useState<number | null>(null)
-  const [isLoading, setIsLoading] = useState<boolean>(true)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const [supabaseData, setSupabaseData] = useState<EnergyRecord[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [selectedRoomId, setSelectedRoomId] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [aiInsights, setAiInsights] = useState<string[]>(AI_INSIGHTS_HOUSEHOLD);
+  const [aiLoading, setAiLoading] = useState(false);
 
   useEffect(() => {
-    const supabase = createClient()
+    const supabase = createClient();
 
     const fetchData = async () => {
-      setIsLoading(true)
+      setIsLoading(true);
       const { data, error } = await supabase
         .from("energy_readings")
         .select(
@@ -53,24 +56,24 @@ export default function Dashboard() {
                 name
               )
             )
-          `,
+          `
         )
-        .order("reading_timestamp", { ascending: true })
+        .order("reading_timestamp", { ascending: true });
 
       if (error) {
-        setLoadError(error.message)
-        setIsLoading(false)
-        return
+        setLoadError(error.message);
+        setIsLoading(false);
+        return;
       }
 
       const mapped: EnergyRecord[] =
         data?.map((row) => {
-          const tariff = (row.tariff_band as TariffBand) ?? "shoulder"
-          const usage = Number(row.usage_kwh ?? 0)
-          const timestamp = row.reading_timestamp as string
-          const deviceName = row.devices?.name ?? "Unknown device"
-          const roomName = row.devices?.rooms?.name ?? "Unknown room"
-          const hour = new Date(timestamp).getHours()
+          const tariff = (row.tariff_band as TariffBand) ?? "shoulder";
+          const usage = Number(row.usage_kwh ?? 0);
+          const timestamp = row.reading_timestamp as string;
+          const deviceName = row.devices?.name ?? "Unknown device";
+          const roomName = row.devices?.rooms?.name ?? "Unknown room";
+          const hour = new Date(timestamp).getHours();
 
           return {
             timestamp,
@@ -79,50 +82,53 @@ export default function Dashboard() {
             energyKwh: usage,
             cost: usage * TARIFF_RATES[tariff],
             isBusinessHours: hour >= 9 && hour <= 18,
-          }
-        }) ?? []
+          };
+        }) ?? [];
 
-      setSupabaseData(mapped)
-      setLoadError(null)
-      setIsLoading(false)
-    }
+      setSupabaseData(mapped);
+      setLoadError(null);
+      setIsLoading(false);
+    };
 
-    fetchData()
-  }, [])
+    fetchData();
+  }, []);
 
   useEffect(() => {
-    const supabase = createClient()
+    const supabase = createClient();
 
     const fetchRooms = async () => {
-      const { data, error } = await supabase.from("rooms").select("id, name").order("name", { ascending: true })
+      const { data, error } = await supabase
+        .from("rooms")
+        .select("id, name")
+        .order("name", { ascending: true });
       if (error) {
-        setLoadError((prev) => prev ?? error.message)
-        return
+        setLoadError((prev) => prev ?? error.message);
+        return;
       }
-      setRooms(data ?? [])
+      setRooms(data ?? []);
       if (data?.length) {
-        setSelectedRoomId(data[0].id)
+        setSelectedRoomId(data[0].id);
       }
-    }
+    };
 
-    fetchRooms()
-  }, [])
+    fetchRooms();
+  }, []);
 
   const data = useMemo(() => {
-    if (!supabaseData.length) return HOUSEHOLD_DATA
-    if (selectedRoomId === null) return supabaseData
-    const selectedRoomName = rooms.find((r) => r.id === selectedRoomId)?.name
-    if (!selectedRoomName) return supabaseData
-    return supabaseData.filter((record) => record.room === selectedRoomName)
-  }, [supabaseData, selectedRoomId, rooms])
+    if (!supabaseData.length) return HOUSEHOLD_DATA;
+    if (selectedRoomId === null) return supabaseData;
+    const selectedRoomName = rooms.find((r) => r.id === selectedRoomId)?.name;
+    if (!selectedRoomName) return supabaseData;
+    return supabaseData.filter((record) => record.room === selectedRoomName);
+  }, [supabaseData, selectedRoomId, rooms]);
 
-  const summary = useMemo(() => calculateSummary(data), [data])
-  const insights = AI_INSIGHTS_HOUSEHOLD
+  const summary = useMemo(() => calculateSummary(data), [data]);
+  const insights = AI_INSIGHTS_HOUSEHOLD;
   const spaceName = supabaseData.length
     ? selectedRoomId
       ? `Room: ${rooms.find((r) => r.id === selectedRoomId)?.name ?? "Room"}`
       : "All Rooms"
-    : "Household Demo"
+    : "Household Demo";
 
   const initialAlerts: AlertMessage[] = [
     {
@@ -133,12 +139,38 @@ export default function Dashboard() {
       timestamp: new Date(Date.now() - 5 * 60000),
       severity: "info",
     },
-  ]
+  ];
 
-  const handleReanalyze = () => {
-    // TODO: In production, re-fetch data from analytics API
-    alert("Re-analyzing energy data... (mock)")
-  }
+  const handleReanalyze = async () => {
+    setAiLoading(true);
+    try {
+      const summary = buildLLMUsageSummary(data);
+
+      const res = await fetch("/api/energy-suggestions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scope: selectedRoomId === null ? "all_rooms" : "single_room",
+          spaceName,
+          summary,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Request failed");
+
+      const json = await res.json();
+      if (Array.isArray(json.insights)) {
+        setAiInsights(json.insights);
+      }
+    } catch (e) {
+      console.error(e);
+      setAiInsights([
+        "Sorry, something went wrong while generating AI insights.",
+      ]);
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -151,7 +183,11 @@ export default function Dashboard() {
             <Button
               variant={selectedRoomId === null ? "default" : "outline"}
               onClick={() => setSelectedRoomId(null)}
-              className={selectedRoomId === null ? "bg-blue-600 text-white hover:bg-blue-700" : "border-slate-300"}
+              className={
+                selectedRoomId === null
+                  ? "bg-blue-600 text-white hover:bg-blue-700"
+                  : "border-slate-300"
+              }
             >
               All Rooms
             </Button>
@@ -161,14 +197,19 @@ export default function Dashboard() {
                 variant={selectedRoomId === room.id ? "default" : "outline"}
                 onClick={() => setSelectedRoomId(room.id)}
                 className={
-                  selectedRoomId === room.id ? "bg-blue-600 text-white hover:bg-blue-700" : "border-slate-300"
+                  selectedRoomId === room.id
+                    ? "bg-blue-600 text-white hover:bg-blue-700"
+                    : "border-slate-300"
                 }
               >
                 {room.name}
               </Button>
             ))}
           </div>
-          <Button onClick={handleReanalyze} className="bg-blue-600 text-white hover:bg-blue-700">
+          <Button
+            onClick={handleReanalyze}
+            className="bg-blue-600 text-white hover:bg-blue-700"
+          >
             Re-analyze now
           </Button>
         </div>
@@ -220,12 +261,11 @@ export default function Dashboard() {
           <ChartBreakdown data={data} title="Energy by Device" />
         </div>
 
-        {/* Insights & Alerts Row */}
         <div className="grid lg:grid-cols-2 gap-8">
-          <AIInsightsPanel insights={insights} />
+          <AIInsightsPanel insights={aiInsights} isLoading={aiLoading} />
           <AlertsPanel initialAlerts={initialAlerts} />
         </div>
       </div>
     </main>
-  )
+  );
 }
