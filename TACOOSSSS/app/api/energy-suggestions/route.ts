@@ -1,15 +1,48 @@
+// app/api/energy-suggestions/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { ai } from "@/lib/gemini";
-import type { LLMUsageSummary } from "@/lib/llm-summary";
+
+// --- NEW: robust parser for Gemini output ---
+function extractInsights(raw: string): string[] {
+  // 1) Try direct JSON
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch {}
+
+  // 2) Try fenced block ```json ... ```
+  const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenceMatch) {
+    const inner = fenceMatch[1].trim();
+    try {
+      const parsed = JSON.parse(inner);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    } catch {}
+  }
+
+  // 3) Try to grab first [ ... ] array substring
+  const arrayMatch = raw.match(/\[([\s\S]*?)\]/);
+  if (arrayMatch) {
+    const candidate = `[${arrayMatch[1]}]`;
+    try {
+      const parsed = JSON.parse(candidate);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    } catch {}
+  }
+
+  // 4) Fallback: split into lines / bullets
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^[\s>*\-•]+/, "").trim())
+    .filter(Boolean);
+}
+
+// ------------------------------------------------
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const {
-      scope, // "all_rooms" | "single_room"
-      spaceName, // e.g. "All Rooms" or "Room: Kitchen"
-      summary,
-    }: { scope: string; spaceName: string; summary: LLMUsageSummary } = body;
+    const { scope, spaceName, summary } = body;
 
     const prompt = `
 You are an energy-efficiency assistant.
@@ -18,18 +51,17 @@ You receive an aggregated summary of electricity usage for ${
       scope === "all_rooms" ? "multiple rooms" : "a single room"
     }.
 
-Data format:
+Data:
 ${JSON.stringify(summary, null, 2)}
 
 Generate 5–8 short, concrete suggestions to reduce energy consumption and cost.
-Mix room-level insights and device-level insights where relevant.
-Each suggestion should be a single sentence, <150 characters, very actionable.
+Each suggestion must be one sentence, <150 characters, and very actionable.
 
-Return ONLY a valid JSON array of strings.
+Return ONLY a JSON array of strings.
 Example:
 [
-  "Shift most of the study room heating from 5–8pm to off-peak hours.",
-  "Turn off idle monitors in the office outside business hours."
+  "Turn off lights in empty rooms.",
+  "Shift laundry to off-peak hours."
 ]
 `;
 
@@ -39,21 +71,11 @@ Example:
     });
 
     const raw = result.text ?? "[]";
-
-    let insights: string[] = [];
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        insights = parsed.map(String);
-      }
-    } catch {
-      // Fallback: if model ignores instructions, just wrap raw string
-      insights = [raw];
-    }
+    const insights = extractInsights(raw); // <-- use helper here
 
     return NextResponse.json({ insights });
   } catch (error) {
-    console.error("Gemini error", error);
+    console.error("Gemini error:", error);
     return NextResponse.json(
       { error: "Failed to generate insights" },
       { status: 500 }
