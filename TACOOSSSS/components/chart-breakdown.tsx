@@ -1,33 +1,52 @@
-"use client"
+"use client";
 
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from "recharts"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import type { EnergyRecord } from "@/lib/mock-data"
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Legend,
+  Tooltip,
+} from "recharts";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import type { EnergyRecord } from "@/lib/mock-data";
 
-interface ChartBreakdownProps {
-  data: EnergyRecord[]
-  title: string
+export type BreakdownItem = { name: string; value: number };
+
+export const BREAKDOWN_COLORS = [
+  "#0ea5e9",
+  "#06b6d4",
+  "#10b981",
+  "#f59e0b",
+  "#ef4444",
+  "#8b5cf6",
+  "#ec4899",
+];
+
+export function buildDeviceBreakdown(data: EnergyRecord[]): BreakdownItem[] {
+  const breakdown = data.reduce((acc, record) => {
+    const existing = acc.find((item) => item.name === record.deviceName);
+    if (existing) {
+      existing.value += record.energyKwh;
+    } else {
+      acc.push({ name: record.deviceName, value: record.energyKwh });
+    }
+    return acc;
+  }, [] as BreakdownItem[]);
+
+  // Sort by value descending for consistent ordering
+  breakdown.sort((a, b) => b.value - a.value);
+  return breakdown;
 }
 
-const COLORS = ["#0ea5e9", "#06b6d4", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
+interface ChartBreakdownProps {
+  data: EnergyRecord[];
+  title: string;
+}
 
 export function ChartBreakdown({ data, title }: ChartBreakdownProps) {
   // Group by device
-  const breakdown = data.reduce(
-    (acc, record) => {
-      const existing = acc.find((item) => item.name === record.deviceName)
-      if (existing) {
-        existing.value += record.energyKwh
-      } else {
-        acc.push({ name: record.deviceName, value: record.energyKwh })
-      }
-      return acc
-    },
-    [] as Array<{ name: string; value: number }>,
-  )
-
-  // Sort by value descending
-  breakdown.sort((a, b) => b.value - a.value)
+  const breakdown = buildDeviceBreakdown(data);
 
   return (
     <Card className="bg-white border-slate-200">
@@ -48,7 +67,10 @@ export function ChartBreakdown({ data, title }: ChartBreakdownProps) {
               dataKey="value"
             >
               {breakdown.map((_, index) => (
-                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                <Cell
+                  key={`cell-${index}`}
+                  fill={BREAKDOWN_COLORS[index % BREAKDOWN_COLORS.length]}
+                />
               ))}
             </Pie>
             <Tooltip
@@ -65,5 +87,5 @@ export function ChartBreakdown({ data, title }: ChartBreakdownProps) {
         </ResponsiveContainer>
       </CardContent>
     </Card>
-  )
+  );
 }
